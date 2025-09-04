@@ -36,11 +36,8 @@ const subFile = async (filePath, fileName, folder) => {
     "python/whisperx_to_captions.py",
   );
 
-  const venvPython = path.join(process.cwd(), ".venv/bin/python3");
-  const pythonExec = existsSync(venvPython) ? venvPython : "python3";
-
   const cmd = [
-    pythonExec,
+    "python3",
     py,
     `--input "${filePath}"`,
     `--output "${outPath.replace("webcam", "subs")}"`,
