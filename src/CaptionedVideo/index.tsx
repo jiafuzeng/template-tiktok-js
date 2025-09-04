@@ -1,3 +1,4 @@
+// 作用：渲染视频并叠加同名 JSON 字幕，输出抖音风格逐词字幕
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AbsoluteFill,
@@ -5,7 +6,6 @@ import {
   cancelRender,
   continueRender,
   delayRender,
-  getStaticFiles,
   staticFile,
   OffthreadVideo,
   Sequence,
@@ -14,9 +14,8 @@ import {
 } from "remotion";
 import { z } from "zod";
 import SubtitlePage from "./SubtitlePage";
-import { getVideoMetadata } from "@remotion/media-utils";
+import { parseMedia } from "@remotion/media-parser";
 import { loadFont } from "../load-font";
-import { NoCaptionFile } from "./NoCaptionFile";
 import { Caption, createTikTokStyleCaptions } from "@remotion/captions";
 
 export type SubtitleProp = {
@@ -24,10 +23,12 @@ export type SubtitleProp = {
   text: string;
 };
 
+// 入参校验：仅要求传入视频路径 src
 export const captionedVideoSchema = z.object({
   src: z.string(),
 });
 
+// 元数据计算：用 parseMedia 读取时长，按固定 fps 推出总帧数
 export const calculateCaptionedVideoMetadata: CalculateMetadataFunction<
   z.infer<typeof captionedVideoSchema>
 > = async ({ props }) => {
@@ -40,35 +41,38 @@ export const calculateCaptionedVideoMetadata: CalculateMetadataFunction<
     return staticFile(input.replace(/^\//, ""));
   };
 
-  const metadata = await getVideoMetadata(resolveSrc(props.src));
+  const media = await parseMedia({
+    src: resolveSrc(props.src),
+    fields: {
+      durationInSeconds: true,
+    },
+  });
 
+  const durationSec = media.durationInSeconds ?? 0;
   return {
     fps,
-    durationInFrames: Math.floor(metadata.durationInSeconds * fps),
+    durationInFrames: Math.max(1, Math.floor(durationSec * fps)),
   };
 };
 
-const getFileExists = (file: string) => {
-  const files = getStaticFiles();
-  const fileExists = files.find((f) => {
-    return f.src === file;
-  });
-  return Boolean(fileExists);
-};
 
-// How many captions should be displayed at a time?
-// Try out:
-// - 1500 to display a lot of words at a time
-// - 200 to only display 1 word at a time
+// 每页字幕显示时长（毫秒）。
+// 可尝试：
+// - 1500：同屏显示更多单词
+// - 200：单词快速切换、基本逐词
 const SWITCH_CAPTIONS_EVERY_MS = 1200;
 
 export const CaptionedVideo: React.FC<{
   src: string;
 }> = ({ src }) => {
+  // 字幕数组状态
   const [subtitles, setSubtitles] = useState<Caption[]>([]);
+  // 渲染阻塞句柄：等待字幕加载完成后再继续渲染
   const [handle] = useState(() => delayRender());
+  // 当前 composition 的帧率
   const { fps } = useVideoConfig();
 
+  // 将相对路径映射到 public/；网络资源保持原样
   const resolveSrc = useCallback((input: string): string => {
     if (/^(https?:|data:|blob:)/.test(input)) {
       return input;
@@ -78,6 +82,7 @@ export const CaptionedVideo: React.FC<{
 
   const resolvedVideoSrc = useMemo(() => resolveSrc(src), [resolveSrc, src]);
 
+  // 由视频名推导同名字幕 JSON 路径（扩展名改为 .json）
   const subtitlesRelativePath = useMemo(() => {
     return src
       .replace(/\.mp4$/i, ".json")
@@ -91,6 +96,7 @@ export const CaptionedVideo: React.FC<{
     return resolveSrc(subtitlesRelativePath);
   }, [resolveSrc, subtitlesRelativePath]);
 
+  // 加载字体 → 拉取字幕 → 归一化为 Caption[] → 继续渲染
   const fetchSubtitles = useCallback(async () => {
     try {
       await loadFont();
@@ -129,6 +135,7 @@ export const CaptionedVideo: React.FC<{
     }
   }, [handle, subtitlesFile]);
 
+  // 首次进入与字幕文件更新时，重新加载字幕
   useEffect(() => {
     fetchSubtitles();
 
@@ -141,6 +148,7 @@ export const CaptionedVideo: React.FC<{
     };
   }, [fetchSubtitles, src, subtitlesFile]);
 
+  // 将逐词字幕在时间上分页，构成可切换的字幕块
   const { pages } = useMemo(() => {
     return createTikTokStyleCaptions({
       combineTokensWithinMilliseconds: SWITCH_CAPTIONS_EVERY_MS,
@@ -180,7 +188,7 @@ export const CaptionedVideo: React.FC<{
           </Sequence>
         );
       })}
-      {getFileExists(`/${subtitlesRelativePath}`) ? null : <NoCaptionFile />}
+      {/* 仅渲染字幕，不显示“无字幕文件”提示 */}
     </AbsoluteFill>
   );
 };
