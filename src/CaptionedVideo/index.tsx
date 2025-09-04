@@ -13,10 +13,11 @@ import {
   watchStaticFile,
 } from "remotion";
 import { z } from "zod";
-import SubtitlePage from "./SubtitlePage";
+// import SubtitlePage from "./SubtitlePage";
 import { parseMedia } from "@remotion/media-parser";
 import { loadFont } from "../load-font";
 import { Caption, createTikTokStyleCaptions } from "@remotion/captions";
+import { styleRegistry } from "./StyleRegistry";
 
 export type SubtitleProp = {
   startInSeconds: number;
@@ -26,6 +27,7 @@ export type SubtitleProp = {
 // 入参校验：仅要求传入视频路径 src
 export const captionedVideoSchema = z.object({
   src: z.string(),
+  styleName: z.string().optional(),
 });
 
 // 元数据计算：用 parseMedia 读取时长，按固定 fps 推出总帧数
@@ -64,7 +66,8 @@ const SWITCH_CAPTIONS_EVERY_MS = 1200;
 
 export const CaptionedVideo: React.FC<{
   src: string;
-}> = ({ src }) => {
+  styleName?: string;
+}> = ({ src, styleName }) => {
   // 字幕数组状态
   const [subtitles, setSubtitles] = useState<Caption[]>([]);
   // 渲染阻塞句柄：等待字幕加载完成后再继续渲染
@@ -156,6 +159,10 @@ export const CaptionedVideo: React.FC<{
     });
   }, [subtitles]);
 
+  const fallback = "Minimal" as const;
+  const StyleComponent =
+    styleRegistry[(styleName as keyof typeof styleRegistry) ?? fallback] ??
+    styleRegistry[fallback];
   return (
     <AbsoluteFill style={{ backgroundColor: "white" }}>
       <AbsoluteFill>
@@ -184,7 +191,8 @@ export const CaptionedVideo: React.FC<{
             from={subtitleStartFrame}
             durationInFrames={durationInFrames}
           >
-            <SubtitlePage key={index} page={page} />
+            {/* 使用注册的样式渲染字幕页，可后续通过 props 切换 */}
+            <StyleComponent key={index} page={page} enterProgress={1} />
           </Sequence>
         );
       })}
